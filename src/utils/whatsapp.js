@@ -1,3 +1,5 @@
+import { prepareOrderImageFiles, generateVisualOrderSlip } from './whatsappMedia';
+
 /**
  * Centralized WhatsApp Ordering & Contact Utility
  * Primary Number: +971 56 154 9027 (wa.me/971561549027)
@@ -8,26 +10,9 @@ export const WHATSAPP_DISPLAY = '+971 56 154 9027';
 export const WHATSAPP_BASE_URL = `https://wa.me/${WHATSAPP_NUMBER}`;
 
 /**
- * Helper to construct direct absolute image URL for WhatsApp link preview
+ * Generates the clean formatted order message text
  */
-export function getProductImageUrl(product) {
-  if (!product) return null;
-  const img = product.image || (typeof product.img === 'string' ? product.img : null);
-  if (!img) return null;
-
-  if (typeof img === 'string' && img.startsWith('http')) {
-    return img;
-  }
-
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://koreamartuae.ae';
-  const cleanFilename = String(img).split('/').pop();
-  return `${origin}/src/assets/products/${cleanFilename}`;
-}
-
-/**
- * Generates a clean, professional, mobile-optimized WhatsApp order URL template
- */
-export function getWhatsAppOrderUrl({
+export function getWhatsAppOrderText({
   orderRef = '',
   items = [],
   customerName = '',
@@ -80,16 +65,11 @@ export function getWhatsAppOrderUrl({
     const qty = item.quantity || 1;
     const price = Number(product.price) || 0;
     const itemTotal = (price * qty).toFixed(2);
-    const imageUrl = getProductImageUrl(product);
 
     text += `*${idx + 1}. ${name}${weight}*\n`;
     text += `   ├ 📊 *Qty:* ${qty}\n`;
     text += `   ├ 💵 *Unit Price:* AED ${price.toFixed(2)}\n`;
-    text += `   ├ 💰 *Item Total:* *AED ${itemTotal}*\n`;
-
-    if (imageUrl) {
-      text += `   └ 🖼️ *Image:* ${imageUrl}\n`;
-    }
+    text += `   └ 💰 *Item Total:* *AED ${itemTotal}*\n`;
 
     if (idx < items.length - 1) text += `\n`;
   });
@@ -123,7 +103,127 @@ export function getWhatsAppOrderUrl({
   text += `━━━━━━━━━━━━━━━━━━━━━━\n`;
   text += `🙏 Thank you for shopping with Korea Mart UAE! 🇰🇷✨`;
 
+  return text;
+}
+
+/**
+ * Generates a clean, professional, mobile-optimized WhatsApp order URL template
+ */
+export function getWhatsAppOrderUrl(orderParams) {
+  const text = getWhatsAppOrderText(orderParams);
   return `${WHATSAPP_BASE_URL}?text=${encodeURIComponent(text)}`;
+}
+
+/**
+ * Complete Real Image Dispatching System:
+ * 1. Prepares real binary File objects for each product image
+ * 2. Generates a high-res branded Digital Order Slip image
+ * 3. Uses Web Share API (Level 2) to share actual image files + order text directly into WhatsApp
+ * 4. Gracefully falls back to WhatsApp Web with Clipboard & Download support if Web Share is unavailable
+ */
+export async function dispatchWhatsAppOrderWithImages(orderData) {
+  const orderText = getWhatsAppOrderText(orderData);
+  const waUrl = `${WHATSAPP_BASE_URL}?text=${encodeURIComponent(orderText)}`;
+
+  // Step 1: Prepare real product image files & digital order slip
+  let productFiles = [];
+  let slipResult = null;
+
+  try {
+    const [files, slip] = await Promise.all([
+      prepareOrderImageFiles(orderData.items, orderData.orderRef),
+      generateVisualOrderSlip(orderData)
+    ]);
+    productFiles = files;
+    slipResult = slip;
+  } catch (err) {
+    console.warn('Could not prepare all image media files:', err);
+  }
+
+  const allFilesToSend = [];
+  if (slipResult && slipResult.file) {
+    allFilesToSend.push(slipResult.file);
+  }
+  if (productFiles && productFiles.length > 0) {
+    allFilesToSend.push(...productFiles);
+  }
+
+  // Step 2: Try native Web Share API with files if supported
+  let sharedSuccessfully = false;
+  if (navigator.canShare && allFilesToSend.length > 0) {
+    try {
+      const shareData = {
+        title: `Korea Mart UAE Order #${orderData.orderRef}`,
+        text: orderText,
+        files: allFilesToSend
+      };
+
+      if (navigator.canShare(shareData)) {
+        await navigator.share(shareData);
+        sharedSuccessfully = true;
+      }
+    } catch (shareErr) {
+      if (shareErr.name !== 'AbortError') {
+        console.warn('Native share failed, proceeding with fallback:', shareErr);
+      } else {
+        // User cancelled share sheet
+        sharedSuccessfully = true;
+      }
+    }
+  }
+
+  // Step 3: Desktop / Non-WebShare Fallback
+  if (!sharedSuccessfully) {
+    // Copy order text and slip to clipboard where supported
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(orderText);
+      }
+    } catch (clipErr) {
+      console.warn('Clipboard write text failed:', clipErr);
+    }
+
+    // Launch WhatsApp chat
+    window.open(waUrl, '_blank');
+  }
+
+  return {
+    success: true,
+    sharedViaNativeFiles: sharedSuccessfully,
+    files: allFilesToSend,
+    slipResult,
+    waUrl,
+    orderText
+  };
+}
+
+/**
+ * Copies an image Blob to system clipboard (for easy Ctrl+V into WhatsApp Web)
+ */
+export async function copyImageToClipboard(blob) {
+  try {
+    if (!navigator.clipboard || !window.ClipboardItem) return false;
+    const item = new ClipboardItem({ [blob.type || 'image/png']: blob });
+    await navigator.clipboard.write([item]);
+    return true;
+  } catch (e) {
+    console.warn('Clipboard copy image failed:', e);
+    return false;
+  }
+}
+
+/**
+ * Downloads a File or Blob directly to user's device
+ */
+export function downloadFile(fileOrBlob, filename = 'product_image.jpg') {
+  const url = URL.createObjectURL(fileOrBlob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename || fileOrBlob.name || 'image.jpg';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
 /**

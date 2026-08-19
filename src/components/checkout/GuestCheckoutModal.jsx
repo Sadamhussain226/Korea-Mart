@@ -7,7 +7,6 @@ import { getProductTitle } from '../../utils/translator';
 import { getProductImage } from '../../utils/assets';
 import {
   X,
-  Send,
   CreditCard,
   Banknote,
   ShieldCheck,
@@ -25,9 +24,10 @@ import {
   ChevronDown,
   MessageCircle,
   BadgeCheck,
-  Search
+  Search,
+  Loader2
 } from 'lucide-react';
-import { WHATSAPP_NUMBER, getWhatsAppOrderUrl } from '../../utils/whatsapp';
+import { getWhatsAppOrderUrl, dispatchWhatsAppOrderWithImages } from '../../utils/whatsapp';
 
 export function GuestCheckoutModal() {
   const { lang, t } = useLanguage();
@@ -51,6 +51,7 @@ export function GuestCheckoutModal() {
     paymentMethod: 'codCash'
   });
 
+  const [isProcessingOrder, setIsProcessingOrder] = useState(false);
   const [errors, setErrors] = useState({});
   const [isLocating, setIsLocating] = useState(false);
   const [locationSuccess, setLocationSuccess] = useState(false);
@@ -124,13 +125,14 @@ export function GuestCheckoutModal() {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handlePlaceOrder = (e) => {
+  const handlePlaceOrder = async (e) => {
     e.preventDefault();
-    if (!validateForm()) return;
+    if (!validateForm() || isProcessingOrder) return;
 
+    setIsProcessingOrder(true);
     const orderRef = `KM-UAE-${Math.floor(10000 + Math.random() * 90000)}`;
 
-    const waUrl = getWhatsAppOrderUrl({
+    const orderPayload = {
       orderRef,
       customerName: formData.fullName,
       phone: formData.phone,
@@ -143,25 +145,47 @@ export function GuestCheckoutModal() {
       grandTotal,
       paymentMethod: formData.paymentMethod,
       notes: formData.notes
-    });
-
-    const orderObject = {
-      orderRef,
-      customer: formData,
-      items: [...cartItems],
-      subtotal,
-      deliveryFee,
-      grandTotal,
-      timestamp: new Date().toLocaleString(),
-      waUrl
     };
 
-    setLastOrderDetails(orderObject);
-    setIsCheckoutOpen(false);
-    clearCart();
+    try {
+      const dispatchResult = await dispatchWhatsAppOrderWithImages(orderPayload);
 
-    // Automatically open WhatsApp with pre-filled message
-    window.open(waUrl, '_blank');
+      const orderObject = {
+        orderRef,
+        customer: formData,
+        items: [...cartItems],
+        subtotal,
+        deliveryFee,
+        grandTotal,
+        timestamp: new Date().toLocaleString(),
+        waUrl: dispatchResult.waUrl,
+        slipResult: dispatchResult.slipResult,
+        files: dispatchResult.files || []
+      };
+
+      setLastOrderDetails(orderObject);
+      setIsCheckoutOpen(false);
+      clearCart();
+    } catch (err) {
+      console.error('Order processing error:', err);
+      // Fallback: direct URL
+      const waUrl = getWhatsAppOrderUrl(orderPayload);
+      setLastOrderDetails({
+        orderRef,
+        customer: formData,
+        items: [...cartItems],
+        subtotal,
+        deliveryFee,
+        grandTotal,
+        timestamp: new Date().toLocaleString(),
+        waUrl
+      });
+      setIsCheckoutOpen(false);
+      clearCart();
+      window.open(waUrl, '_blank');
+    } finally {
+      setIsProcessingOrder(false);
+    }
   };
 
   const totalItemsCount = cartItems.reduce((acc, i) => acc + i.quantity, 0);
@@ -592,10 +616,24 @@ export function GuestCheckoutModal() {
             <button
               type="submit"
               form="checkout-form"
-              className="w-full sm:w-auto bg-gradient-to-r from-emerald-600 via-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-black text-xs sm:text-sm py-3.5 px-8 rounded-2xl shadow-xl transition-all active:scale-95 flex items-center justify-center gap-2.5 cursor-pointer shrink-0 border border-emerald-500/30"
+              disabled={isProcessingOrder}
+              className={`w-full sm:w-auto ${
+                isProcessingOrder
+                  ? 'bg-slate-700 cursor-not-allowed opacity-90'
+                  : 'bg-gradient-to-r from-emerald-600 via-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 active:scale-95 cursor-pointer'
+              } text-white font-black text-xs sm:text-sm py-3.5 px-8 rounded-2xl shadow-xl transition-all flex items-center justify-center gap-2.5 shrink-0 border border-emerald-500/30`}
             >
-              <MessageCircle size={18} className="fill-current text-white shrink-0" />
-              <span>Confirm & Send Order via WhatsApp</span>
+              {isProcessingOrder ? (
+                <>
+                  <Loader2 size={18} className="animate-spin text-amber-300 shrink-0" />
+                  <span>Preparing Product Photos & WhatsApp...</span>
+                </>
+              ) : (
+                <>
+                  <MessageCircle size={18} className="fill-current text-white shrink-0" />
+                  <span>Confirm & Send Order via WhatsApp</span>
+                </>
+              )}
             </button>
           </div>
 

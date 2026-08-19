@@ -396,6 +396,7 @@ export function ProductsPage() {
                   <ProductCard
                     key={product.id}
                     product={product}
+                    layout={viewMode}
                     onQuickView={setQuickViewProduct}
                   />
                 ))}

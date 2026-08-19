@@ -28,27 +28,35 @@ export function CartProvider({ children }) {
   }, [cartItems]);
 
   const addToCart = useCallback((product, quantity = 1) => {
+    if (!product || !product.id) return;
+    const qtyToAdd = Math.max(1, Number(quantity) || 1);
     setCartItems((prev) => {
-      const existingIndex = prev.findIndex((item) => item.product.id === product.id);
+      const existingIndex = prev.findIndex((item) => item.product?.id === product.id);
       if (existingIndex > -1) {
+        // Product already in cart: increment its quantity (no duplicate entry)
         const updated = [...prev];
-        updated[existingIndex].quantity += quantity;
+        updated[existingIndex] = {
+          ...updated[existingIndex],
+          quantity: updated[existingIndex].quantity + qtyToAdd
+        };
         return updated;
       } else {
-        return [...prev, { product, quantity }];
+        return [...prev, { product, quantity: qtyToAdd }];
       }
     });
   }, []);
 
   const removeFromCart = useCallback((productId) => {
-    setCartItems((prev) => prev.filter((item) => item.product.id !== productId));
+    if (!productId) return;
+    setCartItems((prev) => prev.filter((item) => item.product?.id !== productId));
   }, []);
 
   const updateQuantity = useCallback((productId, delta) => {
+    if (!productId) return;
     setCartItems((prev) => {
       return prev
         .map((item) => {
-          if (item.product.id === productId) {
+          if (item.product?.id === productId) {
             const newQty = item.quantity + delta;
             return newQty > 0 ? { ...item, quantity: newQty } : null;
           }

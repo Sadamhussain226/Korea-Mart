@@ -9,6 +9,11 @@ const productMap = {};
 Object.entries(productModules).forEach(([path, module]) => {
   const filename = path.split('/').pop();
   productMap[filename] = module.default || module;
+  // Also register normalized key without non-breaking spaces
+  const cleanKey = filename.replace(/\u00a0/g, ' ').trim();
+  if (!productMap[cleanKey]) {
+    productMap[cleanKey] = module.default || module;
+  }
 });
 
 const bannerMap = {};
@@ -19,7 +24,12 @@ Object.entries(bannerModules).forEach(([path, module]) => {
 
 export const getProductImage = (filename) => {
   if (!filename) return null;
-  return productMap[filename] || null;
+  if (productMap[filename]) return productMap[filename];
+  const cleanKey = filename.replace(/\u00a0/g, ' ').trim();
+  if (productMap[cleanKey]) return productMap[cleanKey];
+  const lowerKey = cleanKey.toLowerCase();
+  const found = Object.entries(productMap).find(([k]) => k.replace(/\u00a0/g, ' ').trim().toLowerCase() === lowerKey);
+  return found ? found[1] : null;
 };
 
 export const getBannerImage = (filename) => {
